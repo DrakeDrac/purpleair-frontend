@@ -1,5 +1,5 @@
-const BASE_URL = 'https://weather.mojserver.fun';
-//const BASE_URL = 'http://localhost:3000';
+let BASE_URL = 'https://weather.mojserver.fun';
+// BASE_URL = 'http://localhost:3000';
 
 export interface User {
   id: number;
@@ -92,6 +92,30 @@ export interface LocationWeatherResponse {
   source: string;
 }
 
+export interface WeatherSource {
+  id: string;
+  name: string;
+}
+
+export interface WeatherSourcesResponse {
+  sources: WeatherSource[];
+}
+
+export interface FeedbackPayload {
+  feedback: string;
+  rating?: number;
+  location: {
+    lat: number;
+    lon: number;
+  };
+  api_source?: string;
+  user_id?: string;
+}
+
+export interface FeedbackResponse {
+  message: string;
+}
+
 
 class ApiClient {
   private getHeaders(includeAuth = false): HeadersInit {
@@ -176,13 +200,33 @@ class ApiClient {
     return this.handleResponse<CitySearchResponse>(response);
   }
 
-  async getLocationWeather(lat: number, lon: number): Promise<LocationWeatherResponse> {
+  async getLocationWeather(lat: number, lon: number, api_source?: string): Promise<LocationWeatherResponse> {
     const params = new URLSearchParams({ lat: lat.toString(), lon: lon.toString() });
+    if (api_source) {
+      params.append('api_source', api_source);
+    }
     const response = await fetch(`${BASE_URL}/api/location/weather?${params}`, {
       method: 'GET',
       headers: this.getHeaders(),
     });
     return this.handleResponse<LocationWeatherResponse>(response);
+  }
+
+  async getWeatherSources(): Promise<WeatherSourcesResponse> {
+    const response = await fetch(`${BASE_URL}/api/location/sources`, {
+      method: 'GET',
+      headers: this.getHeaders(),
+    });
+    return this.handleResponse<WeatherSourcesResponse>(response);
+  }
+
+  async submitFeedback(payload: FeedbackPayload): Promise<FeedbackResponse> {
+    const response = await fetch(`${BASE_URL}/api/feedback`, {
+      method: 'POST',
+      headers: this.getHeaders(true), // Feedback might benefit from auth if available, but optional based on spec
+      body: JSON.stringify(payload),
+    });
+    return this.handleResponse<FeedbackResponse>(response);
   }
 
   // --- PurpleAir Data ---

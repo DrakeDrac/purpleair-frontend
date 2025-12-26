@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Cloud, CloudRain, Sun, Snowflake, Search, Plus, Grid, Wind, Droplets, Eye, Gauge, Sunrise, Sunset, Thermometer, Gamepad2, Shirt, Sparkles, Clock, Quote, Leaf } from 'lucide-react';
-import { apiClient, LocationWeatherResponse } from '../lib/api';
+import { Cloud, CloudRain, Sun, Snowflake, Search, Plus, Grid, Wind, Droplets, Eye, Gauge, Sunrise, Sunset, Thermometer, Gamepad2, Shirt, Sparkles, Clock, Quote, Leaf, MessageSquare, Star } from 'lucide-react';
+import { apiClient, LocationWeatherResponse, WeatherSource } from '../lib/api';
 
 // --- CSS Styles for Animations & Utility ---
 const GlobalStyles = () => (
@@ -63,7 +63,7 @@ const GlobalStyles = () => (
 );
 
 // --- Weather Background Component ---
-const WeatherBackground = ({ weather }) => {
+const WeatherBackground = ({ weather, hour, minute }: { weather: string; hour: number; minute: number }) => {
     const particles = useMemo(() => {
         return Array.from({ length: 50 }).map((_, i) => ({
             left: Math.random() * 100 + '%',
@@ -75,30 +75,130 @@ const WeatherBackground = ({ weather }) => {
         }));
     }, []);
 
+    const sunPos = getSunPosition(hour, minute);
+    const moonPos = getMoonPosition(hour, minute);
+    const timeOfDay = getTimeOfDay(hour);
+
+    // Sun color based on time
+    const getSunColor = () => {
+        if (timeOfDay === 'dawn' || timeOfDay === 'dusk') {
+            return {
+                outer: 'bg-orange-400',
+                middle: 'bg-orange-300',
+                inner: 'bg-yellow-200',
+                glow: 'rgba(255,140,0,0.6)'
+            };
+        } else if (timeOfDay === 'evening') {
+            return {
+                outer: 'bg-orange-500',
+                middle: 'bg-orange-400',
+                inner: 'bg-yellow-300',
+                glow: 'rgba(255,100,0,0.7)'
+            };
+        } else {
+            return {
+                outer: 'bg-yellow-300',
+                middle: 'bg-yellow-200',
+                inner: 'bg-yellow-100',
+                glow: 'rgba(255,215,0,0.6)'
+            };
+        }
+    };
+
+    const sunColor = getSunColor();
+
     return (
         <div className="absolute inset-0 overflow-hidden pointer-events-none z-0">
             <GlobalStyles />
 
-            {weather === 'Sun' && (
+            {/* Stars for night time */}
+            {(timeOfDay === 'night' || timeOfDay === 'dusk') && weather === 'Sun' && (
+                <div className="absolute inset-0">
+                    {Array.from({ length: 100 }).map((_, i) => (
+                        <div
+                            key={i}
+                            className="absolute w-1 h-1 bg-white rounded-full animate-pulse"
+                            style={{
+                                left: `${Math.random() * 100}%`,
+                                top: `${Math.random() * 60}%`,
+                                opacity: Math.random() * 0.8 + 0.2,
+                                animationDelay: `${Math.random() * 3}s`,
+                                animationDuration: `${Math.random() * 2 + 2}s`
+                            }}
+                        />
+                    ))}
+                </div>
+            )}
+
+            {/* Animated Sun Arc */}
+            {weather === 'Sun' && sunPos.visible && (
                 <>
-                    <div className="absolute top-10 right-10 w-32 h-32">
+                    <div
+                        className="absolute w-32 h-32 transition-all duration-1000 ease-out"
+                        style={{
+                            left: `${sunPos.x}%`,
+                            top: `${sunPos.y}%`,
+                            opacity: sunPos.opacity,
+                            transform: 'translate(-50%, -50%)'
+                        }}
+                    >
                         <div className="absolute inset-0 sun-rays">
                             {Array.from({ length: 8 }).map((_, i) => (
-                                <div key={i} className="absolute top-1/2 left-1/2 w-40 h-2 bg-yellow-200/30 -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ transform: `translate(-50%, -50%) rotate(${i * 45}deg)` }}></div>
+                                <div
+                                    key={i}
+                                    className="absolute top-1/2 left-1/2 w-40 h-2 bg-yellow-200/30 -translate-x-1/2 -translate-y-1/2 rounded-full"
+                                    style={{ transform: `translate(-50%, -50%) rotate(${i * 45}deg)` }}
+                                />
                             ))}
                         </div>
-                        <div className="absolute inset-0 bg-yellow-300 rounded-full blur-xl opacity-60 animate-pulse"></div>
-                        <div className="absolute inset-2 bg-yellow-100 rounded-full shadow-[0_0_50px_rgba(255,215,0,0.6)]"></div>
+                        <div className={`absolute inset-0 ${sunColor.outer} rounded-full blur-xl opacity-60 animate-pulse`} />
+                        <div
+                            className={`absolute inset-2 ${sunColor.inner} rounded-full`}
+                            style={{ boxShadow: `0 0 50px ${sunColor.glow}` }}
+                        />
                     </div>
-                    <div className="absolute top-1/4 left-1/4 w-24 h-24 bg-yellow-200 rounded-full blur-3xl opacity-20"></div>
+                    <div
+                        className={`absolute w-24 h-24 ${sunColor.middle} rounded-full blur-3xl opacity-20 transition-all duration-1000`}
+                        style={{
+                            left: `${sunPos.x - 10}%`,
+                            top: `${sunPos.y + 15}%`
+                        }}
+                    />
                 </>
+            )}
+
+            {/* Moon for night time */}
+            {weather === 'Sun' && moonPos.visible && (
+                <div
+                    className="absolute w-24 h-24 transition-all duration-1000 ease-out"
+                    style={{
+                        left: `${moonPos.x}%`,
+                        top: `${moonPos.y}%`,
+                        opacity: moonPos.opacity,
+                        transform: 'translate(-50%, -50%)'
+                    }}
+                >
+                    <div className="absolute inset-0 bg-slate-200 rounded-full blur-md opacity-40" />
+                    <div className="absolute inset-2 bg-slate-100 rounded-full shadow-[0_0_30px_rgba(226,232,240,0.5)]" />
+                    {/* Moon craters */}
+                    <div className="absolute top-1/4 left-1/4 w-3 h-3 bg-slate-300 rounded-full opacity-30" />
+                    <div className="absolute top-1/2 right-1/4 w-2 h-2 bg-slate-300 rounded-full opacity-20" />
+                </div>
             )}
 
             {weather === 'Cloud' && (
                 <>
-                    <div className="absolute top-10 right-20 w-24 h-24 opacity-60">
-                        <div className="absolute inset-0 bg-yellow-200 rounded-full blur-xl"></div>
-                    </div>
+                    {/* Sun during day, moon at night */}
+                    {(timeOfDay === 'night' || timeOfDay === 'dusk') ? (
+                        <div className="absolute top-10 right-20 w-20 h-20 opacity-70">
+                            <div className="absolute inset-0 bg-slate-200 rounded-full blur-md opacity-40" />
+                            <div className="absolute inset-2 bg-slate-100 rounded-full shadow-[0_0_30px_rgba(226,232,240,0.4)]" />
+                        </div>
+                    ) : (
+                        <div className="absolute top-10 right-20 w-24 h-24 opacity-60">
+                            <div className="absolute inset-0 bg-yellow-200 rounded-full blur-xl"></div>
+                        </div>
+                    )}
                     <div className="absolute top-20 -left-20 text-white/40 cloud-drift" style={{ animationDuration: '30s' }}>
                         <Cloud className="w-64 h-64 fill-current blur-sm" />
                     </div>
@@ -223,11 +323,135 @@ const Penguin = ({ weather }) => {
     );
 };
 
+// --- Utility Functions for Time-Based Features ---
+const getTimeOfDay = (hour: number): string => {
+    if (hour >= 5 && hour < 7) return 'dawn';
+    if (hour >= 7 && hour < 10) return 'morning';
+    if (hour >= 10 && hour < 16) return 'day';
+    if (hour >= 16 && hour < 19) return 'evening';
+    if (hour >= 19 && hour < 22) return 'dusk';
+    return 'night';
+};
+
+const getSunPosition = (hour: number, minute: number = 0) => {
+    // Sun visible from 6:00 to 18:00
+    const totalMinutes = hour * 60 + minute;
+    const sunriseMinutes = 6 * 60; // 6:00 AM
+    const sunsetMinutes = 18 * 60; // 6:00 PM
+
+    if (totalMinutes < sunriseMinutes || totalMinutes > sunsetMinutes) {
+        return { visible: false, x: 0, y: 0, opacity: 0 };
+    }
+
+    // Calculate progress through the day (0 to 1)
+    const progress = (totalMinutes - sunriseMinutes) / (sunsetMinutes - sunriseMinutes);
+
+    // Arc positions: left (10%) to right (90%) horizontally
+    const x = 10 + (progress * 80);
+
+    // Vertical arc: starts low, peaks at middle, ends low
+    // Using sine wave for natural arc
+    const y = 10 + (Math.sin(progress * Math.PI) * 30);
+
+    // Opacity: fade in at sunrise/sunset
+    let opacity = 1;
+    if (progress < 0.05) opacity = progress / 0.05;
+    if (progress > 0.95) opacity = (1 - progress) / 0.05;
+
+    return { visible: true, x, y, opacity };
+};
+
+const getMoonPosition = (hour: number, minute: number = 0) => {
+    // Moon visible from 18:00 to 6:00 (next day)
+    const totalMinutes = hour * 60 + minute;
+    const moonriseMinutes = 18 * 60; // 6:00 PM
+    const moonsetMinutes = 30 * 60; // 6:00 AM next day (represented as 30 hours)
+
+    let adjustedMinutes = totalMinutes;
+    if (totalMinutes < 6 * 60) {
+        // After midnight, add 24 hours
+        adjustedMinutes = totalMinutes + 24 * 60;
+    }
+
+    if (adjustedMinutes < moonriseMinutes || adjustedMinutes > moonsetMinutes) {
+        return { visible: false, x: 0, y: 0, opacity: 0 };
+    }
+
+    // Calculate progress through the night
+    const progress = (adjustedMinutes - moonriseMinutes) / (moonsetMinutes - moonriseMinutes);
+
+    const x = 10 + (progress * 80);
+    const y = 10 + (Math.sin(progress * Math.PI) * 30);
+
+    let opacity = 0.9;
+    if (progress < 0.05) opacity = (progress / 0.05) * 0.9;
+    if (progress > 0.95) opacity = ((1 - progress) / 0.05) * 0.9;
+
+    return { visible: true, x, y, opacity };
+};
+
+const getGradientForTime = (weather: string, hour: number): string => {
+    const timeOfDay = getTimeOfDay(hour);
+
+    if (weather === 'Sun') {
+        switch (timeOfDay) {
+            case 'night':
+                return 'bg-gradient-to-b from-indigo-950 via-indigo-900 to-slate-900';
+            case 'dawn':
+                return 'bg-gradient-to-b from-purple-400 via-pink-400 to-orange-400';
+            case 'morning':
+                return 'bg-gradient-to-b from-blue-400 via-cyan-300 to-blue-200';
+            case 'day':
+                return 'bg-gradient-to-b from-sky-400 via-sky-300 to-blue-200';
+            case 'evening':
+                return 'bg-gradient-to-b from-orange-400 via-pink-400 to-orange-300';
+            case 'dusk':
+                return 'bg-gradient-to-b from-orange-600 via-purple-500 to-indigo-800';
+            default:
+                return 'bg-gradient-to-b from-sky-400 via-sky-300 to-blue-200';
+        }
+    } else if (weather === 'Rain') {
+        if (timeOfDay === 'night' || timeOfDay === 'dusk') {
+            return 'bg-gradient-to-b from-slate-950 via-slate-900 to-black';
+        } else if (timeOfDay === 'dawn' || timeOfDay === 'morning') {
+            return 'bg-gradient-to-b from-slate-700 via-slate-600 to-slate-700';
+        } else {
+            return 'bg-gradient-to-b from-slate-800 via-slate-700 to-slate-800';
+        }
+    } else if (weather === 'Cloud') {
+        if (timeOfDay === 'night' || timeOfDay === 'dusk') {
+            return 'bg-gradient-to-b from-slate-700 via-slate-600 to-slate-700';
+        } else if (timeOfDay === 'dawn') {
+            return 'bg-gradient-to-b from-purple-300 via-slate-300 to-slate-400';
+        } else {
+            return 'bg-gradient-to-b from-slate-400 via-slate-300 to-slate-400';
+        }
+    } else if (weather === 'Snow') {
+        if (timeOfDay === 'night' || timeOfDay === 'dusk') {
+            return 'bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-gray-900 via-purple-900 to-violet-950';
+        } else if (timeOfDay === 'dawn') {
+            return 'bg-gradient-to-b from-indigo-300 via-purple-200 to-blue-300';
+        } else if (timeOfDay === 'morning' || timeOfDay === 'day') {
+            return 'bg-gradient-to-b from-sky-300 via-blue-200 to-cyan-200';
+        } else {
+            return 'bg-gradient-to-b from-indigo-400 via-purple-300 to-slate-400';
+        }
+    }
+
+    return 'bg-gradient-to-b from-sky-400 via-sky-300 to-blue-200';
+};
+
 // --- Main Home Component ---
 const Home = () => {
     const [weather, setWeather] = useState('Snow');
     const [showDebugControls, setShowDebugControls] = useState(false);
     const [loading, setLoading] = useState(false);
+
+    // Time Management
+    const [fakeTime, setFakeTime] = useState<number | null>(null);
+    const currentDate = new Date();
+    const currentHour = fakeTime !== null ? Math.floor(fakeTime) : currentDate.getHours();
+    const currentMinute = fakeTime !== null ? Math.round((fakeTime % 1) * 60) : currentDate.getMinutes();
 
     // Location State
     const [location, setLocation] = useState<{ name: string; lat: number | null; lon: number | null }>({
@@ -258,6 +482,13 @@ const Home = () => {
         smart_suggestion: "Connecting to the Penguin...",
         short_response: "..."
     });
+
+    // Sources & Feedback State
+    const [availableSources, setAvailableSources] = useState<WeatherSource[]>([]);
+    const [selectedSource, setSelectedSource] = useState<string | undefined>(undefined);
+    const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
+    const [feedbackData, setFeedbackData] = useState({ rating: 0, comment: '' });
+    const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
 
     // Swipe Logic State (Moved to top)
 
@@ -314,6 +545,14 @@ const Home = () => {
     useEffect(() => {
         // On mount, try to get location
         handleCurrentLocation();
+        // Fetch available sources
+        apiClient.getWeatherSources().then(res => {
+            if (res.sources && res.sources.length > 0) {
+                setAvailableSources(res.sources);
+                // Default to first source if not set, or OpenMeteo if specific logic needed
+                // But generally let's just leave undefined to use backend default initially
+            }
+        }).catch(err => console.error("Failed to fetch sources", err));
     }, []);
 
     // Search Cities Effect
@@ -344,7 +583,7 @@ const Home = () => {
             setLoading(true);
             try {
                 // 1. Get Real Weather
-                const weatherRes = await apiClient.getLocationWeather(location.lat, location.lon);
+                const weatherRes = await apiClient.getLocationWeather(location.lat, location.lon, selectedSource);
 
                 // Update Location Name if it was generic "My Location"
                 if (location.name === "My Location" && weatherRes.location.city) {
@@ -396,12 +635,40 @@ const Home = () => {
         };
 
         fetchData();
-    }, [location.lat, location.lon]); // Only trigger if lat/lon changes
+        fetchData();
+    }, [location.lat, location.lon, selectedSource]); // Only trigger if lat/lon or source changes
+
+    // Feedback Handler
+    const handleFeedbackSubmit = async () => {
+        if (!location.lat || !location.lon) return;
+        setFeedbackSubmitting(true);
+        try {
+            await apiClient.submitFeedback({
+                feedback: feedbackData.comment,
+                rating: feedbackData.rating,
+                location: { lat: location.lat, lon: location.lon },
+                api_source: selectedSource
+            });
+            setIsFeedbackOpen(false);
+            setFeedbackData({ rating: 0, comment: '' });
+            alert("Thanks for your feedback!"); // Simple alert for now, could be a toast
+        } catch (error) {
+            console.error("Feedback failed", error);
+            alert("Failed to submit feedback.");
+        } finally {
+            setFeedbackSubmitting(false);
+        }
+    };
 
     // Dynamic Data based on weather
     const getTheme = () => {
         const aqiInfo = airQuality ? getAqiDescription(airQuality.aqi) : { label: "Good (Est)", msg: "Air seems okay." };
         const aqiString = airQuality ? `${aqiInfo.label} (${airQuality.aqi})` : "Good (35)";
+
+        // Determine text color based on weather and time
+        const timeOfDay = getTimeOfDay(currentHour);
+        const isSnowDaytime = weather === 'Snow' && (timeOfDay === 'morning' || timeOfDay === 'day' || timeOfDay === 'dawn');
+        const textColor = isSnowDaytime ? 'text-slate-800' : 'text-white';
 
         const common = {
             aqi: aqiString,
@@ -410,6 +677,7 @@ const Home = () => {
             high: currentWeather?.temp_max || '--',
             low: currentWeather?.temp_min || '--',
             condition: currentWeather?.condition || 'Loading...',
+            text: textColor,
             advice: {
                 games: advice.games,
                 wear: advice.wear,
@@ -421,7 +689,7 @@ const Home = () => {
             case 'Sun':
                 return {
                     bg: 'bg-gradient-to-b from-sky-400 via-sky-300 to-blue-200',
-                    text: 'text-slate-800',
+                    text: textColor,
                     glass: 'bg-white/40 border-white/50',
                     temp: '24°', condition: 'Sunny', high: '26°', low: '18°', icon: Sun,
                     suggestion: "Don't forget SPF!",
@@ -449,8 +717,8 @@ const Home = () => {
             default:
                 return {
                     bg: 'bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-gray-900 via-purple-900 to-violet-950',
-                    text: 'text-white',
-                    glass: 'bg-white/10 border-white/20',
+                    text: textColor,
+                    glass: isSnowDaytime ? 'bg-white/40 border-white/40' : 'bg-white/10 border-white/20',
                     temp: '5°', condition: 'Heavy Snow', high: '19°', low: '12°', icon: Snowflake,
                     suggestion: "Brrr! it's time to dress warmly!",
                     ...common
@@ -551,9 +819,9 @@ const Home = () => {
         /* Desktop Container */
         <div className="min-h-screen w-full bg-neutral-950 sm:flex sm:items-center sm:justify-center overflow-hidden">
             {/* Mobile Frame */}
-            <div className={`w-full h-[100dvh] sm:w-[400px] sm:rounded-[3rem] sm:border-[8px] sm:border-neutral-800 shadow-2xl overflow-hidden relative flex flex-col items-center font-light selection:bg-pink-500 selection:text-white ${theme.bg} transition-colors duration-1000`}>
+            <div className={`w-full h-[100dvh] sm:w-[400px] sm:rounded-[3rem] sm:border-[8px] sm:border-neutral-800 shadow-2xl overflow-hidden relative flex flex-col items-center font-light selection:bg-pink-500 selection:text-white ${getGradientForTime(weather, currentHour)} transition-colors duration-1000`}>
 
-                <WeatherBackground weather={weather} />
+                <WeatherBackground weather={weather} hour={currentHour} minute={currentMinute} />
 
                 {/* Status Bar */}
                 <div className={`w-full px-6 py-3 flex justify-between items-center text-xs font-medium ${theme.text} opacity-80 z-20`}>
@@ -566,25 +834,111 @@ const Home = () => {
 
                 {/* Top Info Section */}
                 <div className={`w-full px-6 pt-2 flex flex-col items-center z-20 ${theme.text} transition-opacity duration-500 ${isExpanded ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
-                    <div className="w-full flex justify-between items-center mb-8">
+                    <div className="w-full flex justify-between items-center mb-8 relative">
                         <button onClick={() => setIsSearchOpen(true)}>
                             <Search className="w-6 h-6 opacity-80" />
                         </button>
+
+
+                        {/* Source Selector & Feedback */}
+                        <div className="flex gap-2 items-center">
+                            {availableSources.length > 0 && (
+                                <select
+                                    value={selectedSource || ''}
+                                    onChange={(e) => setSelectedSource(e.target.value || undefined)}
+                                    className="bg-black/20 backdrop-blur-md border border-white/10 rounded-full px-3 py-1 text-xs text-white outline-none"
+                                >
+                                    <option value="" className="text-black">Default Source</option>
+                                    {availableSources.map(src => (
+                                        <option key={src.id} value={src.id} className="text-black">{src.name}</option>
+                                    ))}
+                                </select>
+                            )}
+                            <button onClick={() => setIsFeedbackOpen(true)} className="p-2 bg-black/20 backdrop-blur-md border border-white/10 rounded-full text-white/80 hover:bg-white/10">
+                                <MessageSquare className="w-4 h-4" />
+                            </button>
+                        </div>
+
                         {/* Fake Weather Controls */}
                         {showDebugControls && (
-                            <div className={`z-50 flex gap-3 bg-black/20 backdrop-blur-xl p-2 rounded-full border border-white/10 transition-opacity duration-300 ${isExpanded ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
-                                {['Sun', 'Rain', 'Snow', 'Cloud'].map((mode) => (
-                                    <button
-                                        key={mode}
-                                        onClick={() => setWeather(mode)}
-                                        className={`px-4 py-1.5 rounded-full text-sm font-medium transition-all ${weather === mode
-                                            ? 'bg-white text-black shadow-lg scale-105'
-                                            : 'text-white/70 hover:bg-white/10'
-                                            }`}
-                                    >
-                                        {mode}
-                                    </button>
-                                ))}
+                            <div className={`absolute left-1/2 -translate-x-1/2 top-14 z-50 flex flex-col gap-3 bg-black/20 backdrop-blur-xl p-4 rounded-3xl border border-white/10 transition-opacity duration-300 ${isExpanded ? 'opacity-0 pointer-events-none' : 'opacity-100'} min-w-[300px]`}>
+                                {/* Weather Mode Buttons */}
+                                <div className="flex gap-2 justify-center">
+                                    {['Sun', 'Rain', 'Snow', 'Cloud'].map((mode) => (
+                                        <button
+                                            key={mode}
+                                            onClick={() => setWeather(mode)}
+                                            className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all ${weather === mode
+                                                ? 'bg-white text-black shadow-lg scale-105'
+                                                : 'text-white/70 hover:bg-white/10'
+                                                }`}
+                                        >
+                                            {mode}
+                                        </button>
+                                    ))}
+                                </div>
+
+                                {/* Time Slider */}
+                                <div className="flex flex-col gap-2 pt-2 border-t border-white/10">
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-xs font-medium text-white/70">Time of Day</span>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-sm font-bold text-white">
+                                                {fakeTime !== null
+                                                    ? `${Math.floor(fakeTime).toString().padStart(2, '0')}:${Math.round((fakeTime % 1) * 60).toString().padStart(2, '0')}`
+                                                    : `${currentHour.toString().padStart(2, '0')}:${currentMinute.toString().padStart(2, '0')}`
+                                                }
+                                            </span>
+                                            {fakeTime !== null && (
+                                                <button
+                                                    onClick={() => setFakeTime(null)}
+                                                    className="text-xs text-white/60 hover:text-white/90 underline"
+                                                >
+                                                    Reset
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <input
+                                        type="range"
+                                        min="0"
+                                        max="24"
+                                        step="0.25"
+                                        value={fakeTime !== null ? fakeTime : currentHour + currentMinute / 60}
+                                        onChange={(e) => setFakeTime(parseFloat(e.target.value))}
+                                        className="w-full h-2 bg-gradient-to-r from-indigo-900 via-orange-400 to-indigo-900 rounded-full appearance-none cursor-pointer"
+                                        style={{
+                                            WebkitAppearance: 'none',
+                                        }}
+                                    />
+                                    <style>{`
+                                        input[type="range"]::-webkit-slider-thumb {
+                                            appearance: none;
+                                            width: 16px;
+                                            height: 16px;
+                                            border-radius: 50%;
+                                            background: white;
+                                            cursor: pointer;
+                                            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+                                        }
+                                        input[type="range"]::-moz-range-thumb {
+                                            width: 16px;
+                                            height: 16px;
+                                            border-radius: 50%;
+                                            background: white;
+                                            cursor: pointer;
+                                            border: none;
+                                            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+                                        }
+                                    `}</style>
+                                    <div className="flex justify-between text-[10px] text-white/50">
+                                        <span>🌙 Night</span>
+                                        <span>🌅 Dawn</span>
+                                        <span>☀️ Day</span>
+                                        <span>🌇 Dusk</span>
+                                        <span>🌙 Night</span>
+                                    </div>
+                                </div>
                             </div>
                         )}
 
@@ -592,6 +946,8 @@ const Home = () => {
                             <svg className="w-6 h-6 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
                         </button>
                     </div>
+
+
 
                     {/* Horizontal Layout for Location and Temp */}
                     <div className="flex flex-row items-center justify-center gap-6 mb-2">
@@ -797,6 +1153,8 @@ const Home = () => {
                                 </div>
                             </button>
 
+
+
                             {/* Search Results */}
                             <div className="flex-1 overflow-y-auto no-scrollbar space-y-2">
                                 <div className={`text-xs font-bold uppercase opacity-40 mb-3 ml-1 ${theme.text}`}>
@@ -840,8 +1198,51 @@ const Home = () => {
                     </div>
                 )}
 
-            </div>
-        </div>
+                {/* --- FEEDBACK MODAL --- */}
+                {isFeedbackOpen && (
+                    <div className="absolute inset-0 z-[70] bg-black/40 backdrop-blur-sm flex items-center justify-center p-6">
+                        <div className={`w-full max-w-sm ${theme.bg} ${theme.glass} border border-white/20 rounded-3xl p-6 shadow-2xl relative`}>
+                            <button
+                                onClick={() => setIsFeedbackOpen(false)}
+                                className={`absolute top-4 right-4 p-2 rounded-full hover:bg-white/10 ${theme.text} opacity-70`}
+                            >
+                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                            </button>
+
+                            <h2 className={`text-xl font-bold mb-4 ${theme.text}`}>Report Issue</h2>
+                            <p className={`text-sm mb-4 opacity-80 ${theme.text}`}>Help us improve the weather accuracy.</p>
+
+                            <div className="flex gap-2 mb-6 justify-center">
+                                {[1, 2, 3, 4, 5].map((star) => (
+                                    <button
+                                        key={star}
+                                        onClick={() => setFeedbackData({ ...feedbackData, rating: star })}
+                                        className={`transition-transform hover:scale-110 ${feedbackData.rating >= star ? 'text-yellow-400 fill-yellow-400' : 'text-white/40'}`}
+                                    >
+                                        <Star className="w-8 h-8 fill-current" />
+                                    </button>
+                                ))}
+                            </div>
+
+                            <textarea
+                                value={feedbackData.comment}
+                                onChange={(e) => setFeedbackData({ ...feedbackData, comment: e.target.value })}
+                                placeholder="What seems wrong?"
+                                className="w-full h-32 bg-black/10 rounded-xl p-4 text-sm outline-none resize-none mb-4 placeholder:text-white/40"
+                            />
+
+                            <button
+                                onClick={handleFeedbackSubmit}
+                                disabled={feedbackSubmitting}
+                                className={`w-full py-3 rounded-xl font-bold ${theme.text} bg-white/20 hover:bg-white/30 transition-colors disabled:opacity-50`}
+                            >
+                                {feedbackSubmitting ? 'Sending...' : 'Submit Feedback'}
+                            </button>
+                        </div>
+                    </div>
+                )}
+            </div >
+        </div >
     );
 };
 
