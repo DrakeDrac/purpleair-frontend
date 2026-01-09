@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Cloud, CloudRain, Sun, Snowflake, Search, Plus, Grid, Wind, Droplets, Eye, Gauge, Sunrise, Sunset, Thermometer, Gamepad2, Shirt, Sparkles, Clock, Quote, Leaf, MessageSquare, Star } from 'lucide-react';
-import { apiClient, LocationWeatherResponse, WeatherSource } from '../lib/api';
+import { Cloud, CloudRain, Sun, Snowflake, Search, Plus, Grid, Wind, Droplets, Eye, Gauge, Sunrise, Sunset, Thermometer, Gamepad2, Shirt, Sparkles, Clock, Quote, Leaf, MessageSquare, Star, Pencil, Check, X, RotateCcw } from 'lucide-react';
+import { apiClient, LocationWeatherResponse, WeatherSource, SourceWeatherData } from '../lib/api';
 
 // --- CSS Styles for Animations & Utility ---
 const GlobalStyles = () => (
@@ -233,7 +233,7 @@ const WeatherBackground = ({ weather, hour, minute }: { weather: string; hour: n
 };
 
 // --- The Cute Penguin Component ---
-const Penguin = ({ weather }) => {
+const Penguin = ({ weather, holdingSensor }: { weather: string, holdingSensor?: boolean }) => {
     const [blink, setBlink] = useState(false);
 
     useEffect(() => {
@@ -316,6 +316,17 @@ const Penguin = ({ weather }) => {
                     <g transform="translate(140, 130) rotate(20)">
                         <path d="M0 0 L10 25 L20 0 Z" fill="#D97706" />
                         <circle cx="10" cy="-5" r="10" fill="#EC4899" />
+                    </g>
+                )}
+
+                {/* Sensor in Hand (PurpleAir Mode) */}
+                {holdingSensor && (
+                    <g transform="translate(160, 130) rotate(-10)">
+                        <rect x="0" y="0" width="30" height="40" rx="4" fill="#E2E8F0" stroke="#94A3B8" strokeWidth="2" />
+                        <circle cx="15" cy="15" r="8" fill="#A855F7" opacity="0.8" />
+                        <rect x="10" y="28" width="10" height="3" fill="#475569" />
+                        {/* Blinking LED */}
+                        <circle cx="25" cy="5" r="2" fill="#22C55E" className="animate-ping" />
                     </g>
                 )}
             </svg>
@@ -472,8 +483,9 @@ const Home = () => {
     const sheetRef = useRef<HTMLDivElement>(null);
 
     // New State for Real Air Quality
-    const [airQuality, setAirQuality] = useState<{ aqi: number; pm2_5: number; pm10: number; uv_index: number } | null>(null);
+    const [airQuality, setAirQuality] = useState<LocationWeatherResponse['air_quality'] | null>(null);
     const [currentWeather, setCurrentWeather] = useState<LocationWeatherResponse['weather'] | null>(null);
+    const [sourcesData, setSourcesData] = useState<SourceWeatherData[]>([]);
 
     // Advice State
     const [advice, setAdvice] = useState({
@@ -491,15 +503,25 @@ const Home = () => {
     const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
 
     // Swipe Logic State (Moved to top)
+    const [viewMode, setViewMode] = useState<'default' | 'purpleair'>('default');
+    const startX = useRef(0);
+    const dragXRef = useRef(0);
+
+    // Custom Sensor State
+    const [customSensorId, setCustomSensorId] = useState<string | null>(localStorage.getItem('pa_sensor_id'));
+    const [isEditingSensor, setIsEditingSensor] = useState(false);
+    const [tempSensorInput, setTempSensorInput] = useState("");
 
     // Time & Quote Logic
     const hour = new Date().getHours();
     const isEvening = hour >= 17;
 
-    const getAqiDescription = (aqi: number) => {
-        if (aqi <= 50) return { label: "Good", msg: "Air is clean! Great for outside play." };
-        if (aqi <= 100) return { label: "Moderate", msg: "It's okay, but maybe take it easy." };
-        if (aqi <= 150) return { label: "Unhealthy for Sensitive", msg: "Mask up if you have asthma!" };
+    const getAqiDescription = (aqi: number | string) => {
+        const val = typeof aqi === 'string' ? parseInt(aqi) : aqi;
+        if (isNaN(val)) return { label: "Unknown", msg: "Air quality data unavailable." };
+        if (val <= 50) return { label: "Good", msg: "Air is clean! Great for outside play." };
+        if (val <= 100) return { label: "Moderate", msg: "It's okay, but maybe take it easy." };
+        if (val <= 150) return { label: "Unhealthy for Sensitive", msg: "Mask up if you have asthma!" };
         return { label: "Unhealthy", msg: "Stay inside and play board games!" };
     };
 
@@ -582,8 +604,38 @@ const Home = () => {
 
             setLoading(true);
             try {
-                // 1. Get Real Weather
-                const weatherRes = await apiClient.getLocationWeather(location.lat, location.lon, selectedSource);
+                let weatherRes: LocationWeatherResponse;
+
+                // 1. Determine Source & Fetch
+                // Check if we are in PurpleAir mode AND have a custom sensor ID
+                if (viewMode === 'purpleair' && customSensorId) {
+                    try {
+                        weatherRes = await apiClient.getPurpleAirWeather(customSensorId);
+
+                        // Update location to match sensor location if different
+                        if (weatherRes.location) {
+                            setLocation(prev => {
+                                if (prev.lat === weatherRes.location.latitude &&
+                                    prev.lon === weatherRes.location.longitude &&
+                                    prev.name === weatherRes.location.city) {
+                                    return prev;
+                                }
+                                return {
+                                    name: weatherRes.location.city,
+                                    lat: weatherRes.location.latitude,
+                                    lon: weatherRes.location.longitude
+                                };
+                            });
+                        }
+                    } catch (e) {
+                        console.error("Failed to fetch custom sensor, falling back", e);
+                        // Fallback to normal location weather if custom fails? 
+                        // Or maybe we should alert. For now, let's fallback to location weather so the app doesn't break.
+                        weatherRes = await apiClient.getLocationWeather(location.lat, location.lon, selectedSource);
+                    }
+                } else {
+                    weatherRes = await apiClient.getLocationWeather(location.lat, location.lon, selectedSource);
+                }
 
                 // Update Location Name if it was generic "My Location"
                 if (location.name === "My Location" && weatherRes.location.city) {
@@ -608,6 +660,13 @@ const Home = () => {
                 // Update Air Quality
                 if (weatherRes.air_quality) {
                     setAirQuality(weatherRes.air_quality);
+                }
+
+                // Update Sources Data
+                if (weatherRes.sources_data) {
+                    setSourcesData(weatherRes.sources_data);
+                } else {
+                    setSourcesData([]);
                 }
 
                 const aiRes = await apiClient.analyzeWeather(weatherRes);
@@ -635,8 +694,7 @@ const Home = () => {
         };
 
         fetchData();
-        fetchData();
-    }, [location.lat, location.lon, selectedSource]); // Only trigger if lat/lon or source changes
+    }, [location.lat, location.lon, selectedSource, customSensorId, viewMode]); // Added customSensorId and viewMode dependencies
 
     // Feedback Handler
     const handleFeedbackSubmit = async () => {
@@ -668,15 +726,23 @@ const Home = () => {
         // Determine text color based on weather and time
         const timeOfDay = getTimeOfDay(currentHour);
         const isSnowDaytime = weather === 'Snow' && (timeOfDay === 'morning' || timeOfDay === 'day' || timeOfDay === 'dawn');
-        const textColor = isSnowDaytime ? 'text-slate-800' : 'text-white';
+        const isCloudDaytime = weather === 'Cloud' && (timeOfDay !== 'night' && timeOfDay !== 'dusk');
+
+        const textColor = (isSnowDaytime || isCloudDaytime) ? 'text-slate-900' : 'text-white';
+
+        const purpleAirData = viewMode === 'purpleair'
+            ? sourcesData.find(s => s.source.toLowerCase().includes('purpleair'))?.weather
+            : null;
+
+        const displayWeather = purpleAirData || currentWeather;
 
         const common = {
             aqi: aqiString,
             aqiMsg: aqiInfo.msg,
-            temp: currentWeather?.temperature || '--',
-            high: currentWeather?.temp_max || '--',
-            low: currentWeather?.temp_min || '--',
-            condition: currentWeather?.condition || 'Loading...',
+            temp: displayWeather?.temperature || '--',
+            high: displayWeather?.temp_max || '--',
+            low: displayWeather?.temp_min || '--',
+            condition: displayWeather?.condition || 'Loading...',
             text: textColor,
             advice: {
                 games: advice.games,
@@ -735,7 +801,9 @@ const Home = () => {
     const onTouchStart = (e: any) => {
         setIsDragging(true);
         startY.current = e.touches[0].clientY;
+        startX.current = e.touches[0].clientX;
         dragYRef.current = 0;
+        dragXRef.current = 0;
     };
 
     const onTouchMove = (e) => {
@@ -748,17 +816,50 @@ const Home = () => {
         else if (!isExpanded && diff < 0) setDragY(diff); // Dragging up from bottom
     };
 
-    const onTouchEnd = () => {
+    const onTouchEnd = (e: any) => {
         setIsDragging(false);
-        const threshold = 100; // Pixels to trigger snap
+        const threshold = 50; // Pixels to trigger snap
 
-        if (Math.abs(dragY) > threshold) {
-            setIsExpanded(!isExpanded); // Toggle state
+        // Vertical Swipe (Bottom Sheet)
+        if (Math.abs(dragY) > threshold && Math.abs(dragY) > Math.abs(dragXRef.current)) { // Ensure primarily vertical
+            if (isExpanded && dragY > 0) setIsExpanded(false);
+            else if (!isExpanded && dragY < 0) setIsExpanded(true);
         }
+
+        // Horizontal Swipe (Page Switch)
+        const currentX = e.changedTouches[0].clientX;
+        const currentY = e.changedTouches[0].clientY;
+        const diffX = currentX - startX.current;
+        const diffY = currentY - startY.current;
+
+        if (Math.abs(diffX) > 50 && Math.abs(diffX) > Math.abs(diffY)) { // Primarily horizontal
+            if (diffX < 0) { // Swipe Left (Go Right)
+                const hasPurpleAir = sourcesData.some(s => s.source.toLowerCase().includes('purpleair'));
+                if (hasPurpleAir) {
+                    setViewMode('purpleair');
+                    const purpleAirSource = availableSources.find(s => s.name.toLowerCase().includes('purpleair'));
+                    if (purpleAirSource) {
+                        setSelectedSource(purpleAirSource.id);
+                    }
+                } else {
+                    // alert("No PurpleAir sensors found in your area."); 
+                    // Using simple alert for now, better to use toast if available or just ignore
+                    // For now, let's just not switch
+                    if (viewMode === 'default') {
+                        alert("No PurpleAir sensors found in your area.");
+                        console.log("No PurpleAir sensors found in your area.", sourcesData);
+                    }
+                }
+            } else if (diffX > 0) { // Swipe Right (Go Left)
+                setViewMode('default');
+                setSelectedSource(undefined);
+            }
+        }
+
         setDragY(0); // Reset drag offset
     };
 
-    // Mouse Event Handlers (Mirrors Touch Logic)
+    // Mouse Event Handlers 
     const onMouseDown = (e: React.MouseEvent) => {
         setIsDragging(true);
         startY.current = e.clientY;
@@ -773,7 +874,6 @@ const Home = () => {
             const currentY = e.clientY;
             const diff = currentY - startY.current;
 
-            // Limit drag range
             if (isExpanded && diff > 0) {
                 setDragY(diff);
                 dragYRef.current = diff;
@@ -842,18 +942,84 @@ const Home = () => {
 
                         {/* Source Selector & Feedback */}
                         <div className="flex gap-2 items-center">
-                            {availableSources.length > 0 && (
-                                <select
-                                    value={selectedSource || ''}
-                                    onChange={(e) => setSelectedSource(e.target.value || undefined)}
-                                    className="bg-black/20 backdrop-blur-md border border-white/10 rounded-full px-3 py-1 text-xs text-white outline-none"
-                                >
-                                    <option value="" className="text-black">Default Source</option>
-                                    {availableSources.map(src => (
-                                        <option key={src.id} value={src.id} className="text-black">{src.name}</option>
-                                    ))}
-                                </select>
+                            {viewMode === 'purpleair' ? (
+                                // PurpleAir Specific UI
+                                <div className="flex items-center gap-2">
+                                    {isEditingSensor ? (
+                                        <div className="flex items-center gap-1 bg-black/40 backdrop-blur-md rounded-full px-2 py-1 border border-white/20 animate-in fade-in slide-in-from-right-4">
+                                            <input
+                                                autoFocus
+                                                type="text"
+                                                value={tempSensorInput}
+                                                onChange={(e) => setTempSensorInput(e.target.value)}
+                                                placeholder="Sensor ID"
+                                                className="bg-transparent border-none outline-none text-white text-xs w-20 placeholder:text-white/40"
+                                            />
+                                            <button
+                                                onClick={() => {
+                                                    if (tempSensorInput.trim()) {
+                                                        localStorage.setItem('pa_sensor_id', tempSensorInput.trim());
+                                                        setCustomSensorId(tempSensorInput.trim());
+                                                    }
+                                                    setIsEditingSensor(false);
+                                                }}
+                                                className="p-1 hover:text-green-400 text-white/80"
+                                            >
+                                                <Check className="w-3 h-3" />
+                                            </button>
+                                            <button
+                                                onClick={() => setIsEditingSensor(false)}
+                                                className="p-1 hover:text-red-400 text-white/80"
+                                            >
+                                                <X className="w-3 h-3" />
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <div className="flex items-center gap-2 bg-black/20 backdrop-blur-md border border-white/10 rounded-full px-3 py-1 text-xs text-white">
+                                            <span className="opacity-80">
+                                                {customSensorId ? `Sensor: ${customSensorId}` : 'PurpleAir'}
+                                            </span>
+                                            <div className="h-3 w-px bg-white/20 mx-1"></div>
+                                            <button
+                                                onClick={() => {
+                                                    setTempSensorInput(customSensorId || "");
+                                                    setIsEditingSensor(true);
+                                                }}
+                                                className="hover:text-white transition-colors text-white/70"
+                                            >
+                                                <Pencil className="w-3 h-3" />
+                                            </button>
+                                            {customSensorId && (
+                                                <button
+                                                    onClick={() => {
+                                                        localStorage.removeItem('pa_sensor_id');
+                                                        setCustomSensorId(null);
+                                                    }}
+                                                    className="hover:text-white transition-colors text-white/70 ml-1"
+                                                    title="Reset to default"
+                                                >
+                                                    <RotateCcw className="w-3 h-3" />
+                                                </button>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            ) : (
+                                // Default Helper UI
+                                availableSources.length > 0 && (
+                                    <select
+                                        value={selectedSource || ''}
+                                        onChange={(e) => setSelectedSource(e.target.value || undefined)}
+                                        className="bg-black/20 backdrop-blur-md border border-white/10 rounded-full px-3 py-1 text-xs text-white outline-none"
+                                    >
+                                        <option value="" className="text-black">Default Source</option>
+                                        {availableSources.map(src => (
+                                            <option key={src.id} value={src.id} className="text-black">{src.name}</option>
+                                        ))}
+                                    </select>
+                                )
                             )}
+
                             <button onClick={() => setIsFeedbackOpen(true)} className="p-2 bg-black/20 backdrop-blur-md border border-white/10 rounded-full text-white/80 hover:bg-white/10">
                                 <MessageSquare className="w-4 h-4" />
                             </button>
@@ -983,7 +1149,7 @@ const Home = () => {
                         </div>
 
                         <div className={`absolute inset-0 w-64 h-64 rounded-full blur-3xl opacity-20 ${weather === 'Sun' ? 'bg-white' : 'bg-white'}`}></div>
-                        <Penguin weather={weather} />
+                        <Penguin weather={weather} holdingSensor={viewMode === 'purpleair'} />
                     </div>
                 </div>
 
@@ -1009,7 +1175,7 @@ const Home = () => {
                         </div>
                     </div>
 
-                    {/* Sheet Content (Scrollable) */}
+                    {/* Sheet Content */}
                     <div className="flex-1 overflow-y-auto no-scrollbar px-6 pb-32">
 
                         {/* Advice Cards Grid */}
@@ -1039,7 +1205,7 @@ const Home = () => {
                             </div>
                         </div>
 
-                        {/* NEW SECTION: Penguin's Smart Update */}
+                        {/* Penguin's Smart Update */}
                         <div className={`mb-6 rounded-3xl p-5 border border-white/10 ${weather === 'Sun' ? 'bg-orange-500/10' : 'bg-white/5'} relative overflow-hidden`}>
                             <div className={`flex items-center gap-2 mb-4 opacity-90 ${theme.text}`}>
                                 <Leaf className="w-5 h-5" />
@@ -1081,33 +1247,80 @@ const Home = () => {
                                     "{randomQuote}"
                                 </span>
                             </div>
-                        </div>
 
-                        {/* Tomorrow/Evening Forecast Section */}
-                        <div className="w-full bg-gradient-to-br from-white/10 to-transparent p-6 rounded-[2rem] border border-white/10 relative overflow-hidden">
-                            <div className={`flex items-center gap-2 mb-4 ${theme.text}`}>
-                                <Sparkles className="w-5 h-5 opacity-80" />
-                                <h3 className="text-sm font-bold uppercase opacity-80">Looking Ahead: {theme.advice.next.label}</h3>
-                            </div>
+                            {/* Weather Source Comparison Section */}
+                            <div className="w-full bg-gradient-to-br from-white/10 to-transparent p-6 rounded-[2rem] border border-white/10 relative overflow-hidden mt-6">
+                                <div className={`flex items-center gap-2 mb-4 ${theme.text}`}>
+                                    <Gauge className="w-5 h-5 opacity-80" />
+                                    <h3 className="text-sm font-bold uppercase opacity-80">Weather Source Comparison</h3>
+                                </div>
 
-                            <div className="flex items-center justify-between mb-4">
-                                <div className="flex items-center gap-4">
-                                    <WeatherIcon className={`w-12 h-12 ${theme.text}`} />
-                                    <span className={`text-4xl font-light ${theme.text}`}>{theme.advice.next.temp}</span>
+                                <div className="flex flex-col gap-3">
+                                    {sourcesData.length > 0 ? (
+                                        sourcesData.map((source, index) => {
+                                            if (source.error || !source.weather) {
+                                                return (
+                                                    <div key={index} className="flex items-center justify-between bg-white/5 p-3 rounded-xl border border-white/5 opacity-60">
+                                                        <span className={`text-xs font-bold uppercase opacity-60 ${theme.text}`}>{source.source}</span>
+                                                        <span className={`text-sm italic ${theme.text}`}>Unavailable</span>
+                                                    </div>
+                                                );
+                                            }
+                                            return (
+                                                <div key={index} className="flex flex-col bg-white/5 p-4 rounded-xl border border-white/5 gap-3">
+                                                    <div className="flex items-center justify-between">
+                                                        <div className="flex flex-col">
+                                                            <span className={`text-xs font-bold uppercase opacity-60 ${theme.text}`}>{source.source}</span>
+                                                            <span className={`text-sm font-light opacity-80 ${theme.text}`}>{source.weather.condition}</span>
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            {/* Simple condition match for icon */}
+                                                            {source.weather.condition.toLowerCase().includes('rain') ? <CloudRain className={`w-5 h-5 ${theme.text} opacity-70`} /> :
+                                                                source.weather.condition.toLowerCase().includes('snow') ? <Snowflake className={`w-5 h-5 ${theme.text} opacity-70`} /> :
+                                                                    source.weather.condition.toLowerCase().includes('cloud') ? <Cloud className={`w-5 h-5 ${theme.text} opacity-70`} /> :
+                                                                        <Sun className={`w-5 h-5 ${theme.text} opacity-70`} />
+                                                            }
+                                                            <span className={`text-2xl font-light ${theme.text}`}>{source.weather.temperature}</span>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Expanded Details Grid */}
+                                                    <div className="grid grid-cols-2 gap-2 text-xs opacity-70 border-t border-white/5 pt-2">
+                                                        <div className={`flex justify-between ${theme.text}`}>
+                                                            <span>Feels Like:</span>
+                                                            <span className="font-semibold">{source.weather.feels_like}</span>
+                                                        </div>
+                                                        <div className={`flex justify-between ${theme.text}`}>
+                                                            <span>Humidity:</span>
+                                                            <span className="font-semibold">{source.weather.humidity}</span>
+                                                        </div>
+                                                        <div className={`flex justify-between ${theme.text}`}>
+                                                            <span>Wind:</span>
+                                                            <span className="font-semibold">{source.weather.wind_speed}</span>
+                                                        </div>
+                                                        <div className={`flex justify-between ${theme.text}`}>
+                                                            <span>Cloud:</span>
+                                                            <span className="font-semibold">{source.weather.cloud_cover}</span>
+                                                        </div>
+                                                        <div className={`flex justify-between ${theme.text}`}>
+                                                            <span>H / L:</span>
+                                                            <span className="font-semibold">{source.weather.temp_max} / {source.weather.temp_min}</span>
+                                                        </div>
+                                                        <div className={`flex justify-between ${theme.text}`}>
+                                                            <span>Precip:</span>
+                                                            <span className="font-semibold">{source.weather.precipitation}"</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })
+                                    ) : (
+                                        <div className={`text-sm opacity-60 text-center py-4 ${theme.text}`}>No other sources available</div>
+                                    )}
                                 </div>
                             </div>
 
-                            {/* Penguin Message Bubble */}
-                            <div className={`relative bg-white/90 p-3 rounded-xl rounded-tl-none ${weather === 'Rain' || weather === 'Snow' ? 'text-slate-900' : 'text-slate-800'}`}>
-                                <p className="text-sm font-medium italic">
-                                    "{theme.advice.next.msg}"
-                                </p>
-                                {/* Triangle Tip */}
-                                <div className="absolute -top-2 left-0 w-0 h-0 border-l-[10px] border-l-transparent border-b-[10px] border-b-white/90 border-r-[10px] border-r-transparent transform -rotate-12 translate-x-1"></div>
-                            </div>
-
                         </div>
-
                     </div>
                 </div>
 
@@ -1241,8 +1454,8 @@ const Home = () => {
                         </div>
                     </div>
                 )}
-            </div >
-        </div >
+            </div>
+        </div>
     );
 };
 

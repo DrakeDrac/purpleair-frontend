@@ -1,5 +1,5 @@
 let BASE_URL = 'https://weather.mojserver.fun';
-// BASE_URL = 'http://localhost:3000';
+BASE_URL = 'http://localhost:3000';
 
 export interface User {
   id: number;
@@ -62,34 +62,49 @@ export interface CitySearchResponse {
   results: CitySearchResult[];
 }
 
+export interface WeatherData {
+  temperature: string;
+  feels_like: string;
+  humidity: string;
+  condition: string;
+  is_day: boolean;
+  precipitation: number;
+  snowfall: number;
+  wind_speed: string;
+  cloud_cover: string;
+  visibility: string;
+  temp_max: string;
+  temp_min: string;
+}
+
+export interface SourceWeatherData {
+  source: string;
+  weather?: WeatherData;
+  error?: string;
+  // It seems the API returns full objects similar to LocationWeatherResponse, but let's capture the essential nested parts.
+  // Based on the user JSON, it effectively has 'weather', 'air_quality' etc.
+  // But for the UI we only used temp and condition so far.
+}
+
 export interface LocationWeatherResponse {
   location: {
     city: string;
     latitude: number;
     longitude: number;
     country: string;
+    timezone?: string;
+    timezone_abbreviation?: string;
+    local_time?: string;
   };
-  weather: {
-    temperature: string;
-    feels_like: string;
-    humidity: string;
-    condition: string;
-    is_day: boolean;
-    precipitation: number;
-    snowfall: number;
-    wind_speed: string;
-    cloud_cover: string;
-    visibility: string;
-    temp_max: string;
-    temp_min: string;
-  };
+  weather: WeatherData;
   air_quality: {
-    aqi: number;
-    pm2_5: number;
-    pm10: number;
-    uv_index: number;
+    aqi: number | string; // API might return "N/A"
+    pm2_5: number | string;
+    pm10: number | string;
+    uv_index: number | string;
   };
   source: string;
+  sources_data?: SourceWeatherData[];
 }
 
 export interface WeatherSource {
@@ -218,6 +233,14 @@ class ApiClient {
       headers: this.getHeaders(),
     });
     return this.handleResponse<WeatherSourcesResponse>(response);
+  }
+
+  async getPurpleAirWeather(id: string): Promise<LocationWeatherResponse> {
+    const response = await fetch(`${BASE_URL}/api/location/weather/purpleair/${id}`, {
+      method: 'GET',
+      headers: this.getHeaders(),
+    });
+    return this.handleResponse<LocationWeatherResponse>(response);
   }
 
   async submitFeedback(payload: FeedbackPayload): Promise<FeedbackResponse> {
