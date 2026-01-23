@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Cloud, CloudRain, Sun, Snowflake, Search, Plus, Grid, Wind, Droplets, Eye, Gauge, Sunrise, Sunset, Thermometer, Gamepad2, Shirt, Sparkles, Clock, Quote, Leaf, MessageSquare, Star, Pencil, Check, X, RotateCcw } from 'lucide-react';
 import { apiClient, LocationWeatherResponse, WeatherSource, SourceWeatherData } from '../lib/api';
+import CustomDialog from '../components/CustomDialog';
 
 // --- CSS Styles for Animations & Utility ---
 const GlobalStyles = () => (
@@ -458,18 +459,48 @@ const Home = () => {
     const [showDebugControls, setShowDebugControls] = useState(false);
     const [loading, setLoading] = useState(false);
 
-    // Time Management
-    const [fakeTime, setFakeTime] = useState<number | null>(null);
-    const currentDate = new Date();
-    const currentHour = fakeTime !== null ? Math.floor(fakeTime) : currentDate.getHours();
-    const currentMinute = fakeTime !== null ? Math.round((fakeTime % 1) * 60) : currentDate.getMinutes();
-
     // Location State
-    const [location, setLocation] = useState<{ name: string; lat: number | null; lon: number | null }>({
+    const [location, setLocation] = useState<{ name: string; lat: number | null; lon: number | null; timezone?: string }>({
         name: "Loading...",
         lat: null,
-        lon: null
+        lon: null,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
     });
+
+    // Time Management
+    const [fakeTime, setFakeTime] = useState<number | null>(null);
+
+    // Consolidated Time Logic
+    const getCurrentTimeInZone = (timezone?: string) => {
+        if (fakeTime !== null) {
+            return {
+                hour: Math.floor(fakeTime),
+                minute: Math.round((fakeTime % 1) * 60)
+            };
+        }
+
+        const now = new Date();
+        try {
+            // Use the provided timezone, or fallback to browser's resolved timezone, or default to UTC
+            const validTimezone = timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+            // Format: "H:mm" 24-hour cycle
+            const timeString = new Intl.DateTimeFormat('en-US', {
+                timeZone: validTimezone,
+                hour: 'numeric',
+                minute: 'numeric',
+                hour12: false
+            }).format(now);
+
+            const [h, m] = timeString.split(':').map(Number);
+            return { hour: h, minute: m };
+        } catch (e) {
+            console.error("Invalid timezone:", timezone, e);
+            return { hour: now.getHours(), minute: now.getMinutes() };
+        }
+    };
+
+    const { hour: currentHour, minute: currentMinute } = getCurrentTimeInZone(location.timezone);
     const [isSearchOpen, setIsSearchOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
     const [searchResults, setSearchResults] = useState<any[]>([]); // Using any for simplicity or import CitySearchResult
@@ -512,8 +543,51 @@ const Home = () => {
     const [isEditingSensor, setIsEditingSensor] = useState(false);
     const [tempSensorInput, setTempSensorInput] = useState("");
 
+
+    // Dialog State
+    const [dialogState, setDialogState] = useState<{
+        isOpen: boolean;
+        title: string;
+        message: string;
+        type?: 'info' | 'error' | 'success';
+        showInput?: boolean;
+        onConfirm?: () => void;
+    }>({
+        isOpen: false,
+        title: '',
+        message: '',
+        type: 'info'
+    });
+
+    const closeDialog = () => {
+        setDialogState(prev => ({ ...prev, isOpen: false }));
+        // Reset temp input on close just in case
+        setTempSensorInput("");
+    };
+
+    const handleSensorUpdate = (inputValue?: string) => {
+        // Use the passed value from CustomDialog, which is current input
+        // Fallback to tempSensorInput if available (though passed arg is safer)
+        const valToUse = inputValue !== undefined ? inputValue : tempSensorInput;
+
+        if (valToUse && valToUse.trim() !== "") {
+            const newId = valToUse.trim();
+            setCustomSensorId(newId);
+            localStorage.setItem('pa_sensor_id', newId);
+            closeDialog();
+            // We don't revert to default view here, so it should attempt to fetch with new ID
+            setLoading(true); // Show loading while it refetches
+        } else {
+            // User submitted empty input, maybe they just want to close? 
+            // Better to keep dialog open or revert? 
+            // Let's close and revert to default if empty (as if they gave up)
+            closeDialog();
+            setViewMode('default');
+        }
+    };
+
     // Time & Quote Logic
-    const hour = new Date().getHours();
+    const hour = currentHour; // Use the consolidated location-based hour
     const isEvening = hour >= 17;
 
     const getAqiDescription = (aqi: number | string) => {
@@ -547,7 +621,8 @@ const Home = () => {
                     setLocation({
                         name: "My Location",
                         lat: position.coords.latitude,
-                        lon: position.coords.longitude
+                        lon: position.coords.longitude,
+                        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
                     });
                     setIsSearchOpen(false);
                     // Helper to resolve name could be added here later via reverse geocoding API if available
@@ -612,6 +687,13 @@ const Home = () => {
                     try {
                         weatherRes = await apiClient.getPurpleAirWeather(customSensorId);
 
+                        const returnedSource = weatherRes.source;
+                        const match = availableSources.find(s =>
+                            s.id.toLowerCase() === returnedSource.toLowerCase() ||
+                            s.name.toLowerCase() === returnedSource.toLowerCase()
+                        );
+                        if (match) setSelectedSource(match.id);
+                        else setSelectedSource(returnedSource);
                         // Update location to match sensor location if different
                         if (weatherRes.location) {
                             setLocation(prev => {
@@ -623,23 +705,87 @@ const Home = () => {
                                 return {
                                     name: weatherRes.location.city,
                                     lat: weatherRes.location.latitude,
-                                    lon: weatherRes.location.longitude
+                                    lon: weatherRes.location.longitude,
+                                    timezone: weatherRes.location.timezone
                                 };
                             });
                         }
-                    } catch (e) {
-                        console.error("Failed to fetch custom sensor, falling back", e);
-                        // Fallback to normal location weather if custom fails? 
-                        // Or maybe we should alert. For now, let's fallback to location weather so the app doesn't break.
-                        weatherRes = await apiClient.getLocationWeather(location.lat, location.lon, selectedSource);
+
+                    } catch (e: any) {
+                        console.error("Failed to fetch custom sensor", e);
+
+                        let errorMsg = "Failed to fetch sensor data.";
+                        if (e.message) {
+                            try {
+                                // ApiClient might throw raw JSON string
+                                const parsed = JSON.parse(e.message);
+                                if (parsed.error && parsed.error.message) {
+                                    errorMsg = parsed.error.message;
+                                }
+                            } catch (jsonErr) {
+                                // If not JSON, use the message directly
+                                errorMsg = e.message;
+                            }
+                        }
+
+                        setDialogState({
+                            isOpen: true,
+                            title: 'Sensor Error',
+                            message: `${errorMsg} Please check the ID and try again:`,
+                            type: 'error',
+                            showInput: true,
+                            onConfirm: handleSensorUpdate
+                        });
+
+                        // Do NOT fallback to default source. Keep user in PurpleAir view (even if broken).
+                        setLoading(false);
+                        return;
                     }
                 } else {
-                    weatherRes = await apiClient.getLocationWeather(location.lat, location.lon, selectedSource);
+                    try {
+                        weatherRes = await apiClient.getLocationWeather(location.lat, location.lon, selectedSource);
+
+                        const returnedSource = weatherRes.source;
+                        const match = availableSources.find(s =>
+                            s.id.toLowerCase() === returnedSource.toLowerCase() ||
+                            s.name.toLowerCase() === returnedSource.toLowerCase()
+                        );
+                        if (match) {
+                            setSelectedSource(match.id);
+                        } else {
+                            // Fallback if no match found (e.g. backend sends new source not in list yet)
+                            setSelectedSource(returnedSource);
+                        }
+
+                    } catch (e: any) {
+                        // Check if the current selected source is PurpleAir and if it failed
+                        if (selectedSource && selectedSource.toLowerCase().includes('purpleair')) {
+                            console.error("PurpleAir source failed, reverting to default", e);
+                            setDialogState({
+                                isOpen: true,
+                                title: 'Source Error',
+                                message: `Error fetching from PurpleAir: ${e.message || 'Unknown error'}. Reverting to default source.`,
+                                type: 'error'
+                            });
+                            setSelectedSource(undefined);
+                            // Return early to let effect re-run with undefined source
+                            setLoading(false);
+                            return;
+                        }
+                        throw e; // Re-throw if it's not a reversible source error
+                    }
                 }
 
                 // Update Location Name if it was generic "My Location"
                 if (location.name === "My Location" && weatherRes.location.city) {
-                    setLocation(prev => ({ ...prev, name: weatherRes.location.city }));
+                    setLocation(prev => ({
+                        ...prev,
+                        name: weatherRes.location.city,
+                        timezone: weatherRes.location.timezone // Capture timezone
+                    }));
+                } else if (weatherRes.location.timezone && location.timezone !== weatherRes.location.timezone) {
+                    // Ensure timezone is updated even if name didn't change (e.g. searching same city)
+                    setLocation(prev => ({ ...prev, timezone: weatherRes.location.timezone }));
                 }
 
                 setCurrentWeather(weatherRes.weather);
@@ -709,10 +855,20 @@ const Home = () => {
             });
             setIsFeedbackOpen(false);
             setFeedbackData({ rating: 0, comment: '' });
-            alert("Thanks for your feedback!"); // Simple alert for now, could be a toast
+            setDialogState({
+                isOpen: true,
+                title: 'Thank You!',
+                message: "Thanks for your feedback!",
+                type: 'success'
+            });
         } catch (error) {
             console.error("Feedback failed", error);
-            alert("Failed to submit feedback.");
+            setDialogState({
+                isOpen: true,
+                title: 'Submission Failed',
+                message: "Failed to submit feedback. Please try again.",
+                type: 'error'
+            });
         } finally {
             setFeedbackSubmitting(false);
         }
@@ -725,10 +881,11 @@ const Home = () => {
 
         // Determine text color based on weather and time
         const timeOfDay = getTimeOfDay(currentHour);
-        const isSnowDaytime = weather === 'Snow' && (timeOfDay === 'morning' || timeOfDay === 'day' || timeOfDay === 'dawn');
+        const isSunDaytime = weather === 'Sun' && (timeOfDay === 'morning' || timeOfDay === 'day' || timeOfDay === 'evening' || timeOfDay === 'dawn');
+        const isSnowDaytime = weather === 'Snow' && (timeOfDay === 'morning' || timeOfDay === 'day' || timeOfDay === 'dawn' || timeOfDay === 'evening');
         const isCloudDaytime = weather === 'Cloud' && (timeOfDay !== 'night' && timeOfDay !== 'dusk');
 
-        const textColor = (isSnowDaytime || isCloudDaytime) ? 'text-slate-900' : 'text-white';
+        const textColor = (isSunDaytime || isSnowDaytime || isCloudDaytime) ? 'text-slate-900' : 'text-white';
 
         const purpleAirData = viewMode === 'purpleair'
             ? sourcesData.find(s => s.source.toLowerCase().includes('purpleair'))?.weather
@@ -1310,6 +1467,18 @@ const Home = () => {
                                                             <span>Precip:</span>
                                                             <span className="font-semibold">{source.weather.precipitation}"</span>
                                                         </div>
+                                                        {source.air_quality && (
+                                                            <>
+                                                                <div className={`flex justify-between ${theme.text}`}>
+                                                                    <span>AQI:</span>
+                                                                    <span className="font-semibold">{source.air_quality.aqi}</span>
+                                                                </div>
+                                                                <div className={`flex justify-between ${theme.text}`}>
+                                                                    <span>PM2.5:</span>
+                                                                    <span className="font-semibold">{source.air_quality.pm2_5}</span>
+                                                                </div>
+                                                            </>
+                                                        )}
                                                     </div>
                                                 </div>
                                             );
@@ -1454,7 +1623,22 @@ const Home = () => {
                         </div>
                     </div>
                 )}
+
             </div>
+
+            {/* Custom Dialog */}
+            <CustomDialog
+                isOpen={dialogState.isOpen}
+                onClose={closeDialog}
+                title={dialogState.title}
+                message={dialogState.message}
+                type={dialogState.type}
+                showInput={dialogState.showInput}
+                inputValue={tempSensorInput}
+                onInputChange={setTempSensorInput}
+                onConfirm={dialogState.onConfirm}
+                placeholder="Enter Sensor ID (e.g. 12345)"
+            />
         </div>
     );
 };

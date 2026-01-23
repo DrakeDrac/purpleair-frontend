@@ -1,5 +1,5 @@
 let BASE_URL = 'https://weather.mojserver.fun';
-BASE_URL = 'http://localhost:3000';
+//BASE_URL = 'http://localhost:3000';
 
 export interface User {
   id: number;
@@ -80,6 +80,12 @@ export interface WeatherData {
 export interface SourceWeatherData {
   source: string;
   weather?: WeatherData;
+  air_quality?: {
+    aqi: number | string;
+    pm2_5: number | string;
+    pm10: number | string;
+    uv_index: number | string;
+  };
   error?: string;
   // It seems the API returns full objects similar to LocationWeatherResponse, but let's capture the essential nested parts.
   // Based on the user JSON, it effectively has 'weather', 'air_quality' etc.
